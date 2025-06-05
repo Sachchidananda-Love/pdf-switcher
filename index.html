@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Daily PDF Switcher</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
@@ -17,11 +18,7 @@
       font-size: 1.5rem;
     }
 
-    .button-container {
-      margin: 10px 0;
-    }
-
-    button {
+    button { /* General button styling */
       font-size: 1rem;
       padding: 10px 20px;
       margin: 5px;
@@ -30,23 +27,69 @@
       background-color: #007BFF;
       color: white;
       cursor: pointer;
+      transition: background-color 0.3s ease; /* Smooth transition for hover */
     }
 
     button:hover {
       background-color: #0056b3;
     }
 
-    iframe {
-      width: 100%;
-      height: 75vh;
-      border: none;
-      margin-top: 15px;
+    /* PDF.js specific styles */
+    #pdfContainer {
+      width: 100%; /* Takes full width of its parent */
+      max-width: 800px; /* Max width of the PDF container */
+      margin: 20px auto; /* Centered with some margin */
+      border: 1px solid #ccc; /* Optional: adds a border around the canvas */
     }
 
+    #pdfCanvas {
+      display: block; /* Removes extra space below canvas */
+      margin: 0 auto; /* Centers canvas if its width is less than container's */
+      max-width: 100%; /* Ensures canvas is responsive and does not overflow container */
+      /* Height will be set by PDF.js based on PDF page aspect ratio and scale */
+    }
+
+    #pdfControls {
+      display: flex;
+      flex-wrap: wrap; /* Allow items to wrap to the next line on small screens */
+      justify-content: center; /* Center items horizontally */
+      align-items: center; /* Align items vertically */
+      margin-bottom: 15px; /* Space below controls */
+    }
+
+    #pdfControls button { /* Specific styling for buttons within pdfControls */
+      margin: 5px; /* Consistent margin for control buttons */
+      /* Padding and font-size can be adjusted in media queries if needed */
+    }
+
+    #pdfControls span { /* Styling for the page number display */
+      margin: 5px 10px; /* Margin around the text */
+      font-size: 0.9rem;
+    }
+
+    /* Responsive adjustments */
     @media (max-width: 600px) {
-      button {
-        width: 80%;
-        font-size: 1.2rem;
+      h1 {
+        font-size: 1.3rem; /* Slightly smaller heading on small screens */
+      }
+
+      #pdfControls {
+        margin-bottom: 10px;
+      }
+
+      #pdfControls button { /* PDF navigation buttons */
+        font-size: 0.9rem;
+        padding: 8px 15px; /* Slightly smaller padding */
+      }
+
+      #pdfControls span { /* Page info text */
+        font-size: 0.85rem;
+        margin: 5px; /* Reduce margin slightly */
+      }
+
+      #pdfContainer {
+        max-width: 98%; /* Use more of the screen width on small devices */
+        margin-top: 15px;
       }
     }
   </style>
@@ -54,30 +97,106 @@
 <body>
   <h1>Daily PDF Switcher</h1>
 
-  <div class="button-container">
-    <button onclick="showPDF('morning')">Show Morning PDF</button>
-    <button onclick="showPDF('evening')">Show Evening PDF</button>
+  <div id="pdfControls" style="margin-bottom: 10px;">
+    <button id="prevPage">Previous Page</button>
+    <button id="nextPage">Next Page</button>
+    <span style="margin-left: 10px;">Page: <span id="page_num">0</span> / <span id="page_count">0</span></span>
   </div>
-
-  <iframe id="pdfViewer"></iframe>
+  <div id="pdfContainer" style="width: 100%; max-width: 800px; margin: auto;">
+    <canvas id="pdfCanvas"></canvas>
+  </div>
 
   <script>
     const morningPDF = "morning.pdf";
     const eveningPDF = "evening.pdf";
 
-    const viewer = document.getElementById("pdfViewer");
+    // --- MANUAL PDF SELECTION ---
+    // To show the evening PDF, change 'morningPDF' to 'eveningPDF' in the line below.
+    const currentPdfUrl = morningPDF;
+    // --- END MANUAL PDF SELECTION ---
 
-    function autoSetPDF() {
-      const now = new Date();
-      const hours = now.getHours();
-      viewer.src = (hours < 17) ? morningPDF : eveningPDF;
+    let pdfDoc = null;
+    let pageNum = 1;
+    let pageRendering = false;
+    let pageNumPending = null;
+    const scale = 1.5; // Initial scale, can be adjusted
+    const canvas = document.getElementById('pdfCanvas');
+    const ctx = canvas.getContext('2d');
+    const pageNumDisplay = document.getElementById('page_num');
+    const pageCountDisplay = document.getElementById('page_count');
+
+    function renderPage(num) {
+      pageRendering = true;
+      // Using promise to fetch the page
+      pdfDoc.getPage(num).then(function(page) {
+        const viewport = page.getViewport({ scale: scale });
+        // Support HiDPI-screens.
+        const outputScale = window.devicePixelRatio || 1;
+
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = Math.floor(viewport.width) + "px";
+        canvas.style.height =  Math.floor(viewport.height) + "px";
+
+        const transform = outputScale !== 1
+          ? [outputScale, 0, 0, outputScale, 0, 0]
+          : null;
+
+        const renderContext = {
+          canvasContext: ctx,
+          transform: transform,
+          viewport: viewport
+        };
+        const renderTask = page.render(renderContext);
+
+        renderTask.promise.then(function() {
+          pageRendering = false;
+          if (pageNumPending !== null) {
+            // New page rendering is pending
+            renderPage(pageNumPending);
+            pageNumPending = null;
+          }
+        });
+      });
+      // Update page counters
+      pageNumDisplay.textContent = num;
     }
 
-    function showPDF(which) {
-      viewer.src = (which === "morning") ? morningPDF : eveningPDF;
+    function queueRenderPage(num) {
+      if (pageRendering) {
+        pageNumPending = num;
+      } else {
+        renderPage(num);
+      }
     }
 
-    autoSetPDF();
+    function onPrevPage() {
+      if (pageNum <= 1) {
+        return;
+      }
+      pageNum--;
+      queueRenderPage(pageNum);
+    }
+    document.getElementById('prevPage').addEventListener('click', onPrevPage);
+
+    function onNextPage() {
+      if (pageNum >= pdfDoc.numPages) {
+        return;
+      }
+      pageNum++;
+      queueRenderPage(pageNum);
+    }
+    document.getElementById('nextPage').addEventListener('click', onNextPage);
+
+    // Load the initially selected PDF
+    pdfjsLib.getDocument(currentPdfUrl).promise.then(function(pdfDoc_) {
+      pdfDoc = pdfDoc_;
+      pageCountDisplay.textContent = pdfDoc.numPages;
+      pageNum = 1; // Ensure we start at page 1
+      renderPage(pageNum);
+    }).catch(function(error) {
+      console.error('Error loading PDF: ' + currentPdfUrl, error);
+    });
   </script>
 </body>
 </html>
