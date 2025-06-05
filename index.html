@@ -119,7 +119,8 @@
     let pageNum = 1;
     let pageRendering = false;
     let pageNumPending = null;
-    const scale = 1.5; // Initial scale, can be adjusted
+    // Note: The global 'scale' constant has been removed.
+    // It's now calculated dynamically in renderPage.
     const canvas = document.getElementById('pdfCanvas');
     const ctx = canvas.getContext('2d');
     const pageNumDisplay = document.getElementById('page_num');
@@ -129,7 +130,12 @@
       pageRendering = true;
       // Using promise to fetch the page
       pdfDoc.getPage(num).then(function(page) {
+        const container = document.getElementById('pdfContainer');
+        const containerWidth = container.clientWidth;
+        const unscaledViewport = page.getViewport({ scale: 1 });
+        const scale = containerWidth / unscaledViewport.width;
         const viewport = page.getViewport({ scale: scale });
+
         // Support HiDPI-screens.
         const outputScale = window.devicePixelRatio || 1;
 
